@@ -215,8 +215,8 @@ Possible improvements include:
 
 ## 13. Author
 
-**Name:** [Your Name]  
-**Student ID:** [Your Student ID]  
+**Name:** [WONG KA SENG]  
+**Student ID:** [SD24037]  
 **Subject:** BSD2513 – Introduction to Artificial Intelligence  
 **Laboratory:** Lab Report 3 – Knowledge Representation System  
 **Topic:** Rule-Based System
