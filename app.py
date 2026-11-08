@@ -2,13 +2,12 @@
 import json
 from typing import List, Dict, Any, Tuple
 import operator
-import streamlit as st
 import pandas as pd
-from datetime import datetime
+import streamlit as st
 
-# ----------------------------
-# 1) Minimal rule engine
-# ----------------------------
+# --------------------------------------------------
+# 1. OPERATOR DEFINITIONS
+# --------------------------------------------------
 
 OPS = {
     "==": operator.eq,
@@ -18,10 +17,13 @@ OPS = {
     "<": operator.lt,
     "<=": operator.le,
     "in": lambda a, b: a in b,
-    "not_in": lambda a, b: a not in b,
+    "not_in": lambda a, b: a not in b
 }
 
-# EXACTLY the five rules provided in the assignment
+# --------------------------------------------------
+# 2. DEFAULT SCHOLARSHIP RULES
+# --------------------------------------------------
+
 DEFAULT_RULES: List[Dict[str, Any]] = [
     {
         "name": "Top merit candidate",
@@ -84,13 +86,14 @@ DEFAULT_RULES: List[Dict[str, Any]] = [
             "decision": "REJECT",
             "reason": "Too many disciplinary records"
         }
-    },
+    }
 ]
 
+# --------------------------------------------------
+# 3. RULE EVALUATION FUNCTIONS
+# --------------------------------------------------
 
 def evaluate_condition(facts: Dict[str, Any], cond: List[Any]) -> bool:
-    """Evaluate a single condition: [field, operator, value]."""
-
     if len(cond) != 3:
         return False
 
@@ -106,11 +109,9 @@ def evaluate_condition(facts: Dict[str, Any], cond: List[Any]) -> bool:
 
 
 def rule_matches(facts: Dict[str, Any], rule: Dict[str, Any]) -> bool:
-    """All conditions must be true (AND)."""
-
     return all(
         evaluate_condition(facts, condition)
-        for condition in rule.get("conditions", [])
+        for condition in rule["conditions"]
     )
 
 
@@ -118,12 +119,6 @@ def run_rules(
     facts: Dict[str, Any],
     rules: List[Dict[str, Any]]
 ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
-    """
-    Returns (best_action, fired_rules).
-
-    The highest-priority matched rule determines the final decision.
-    If priorities are equal, the first encountered rule wins.
-    """
 
     fired = [
         rule for rule in rules
@@ -131,485 +126,314 @@ def run_rules(
     ]
 
     if not fired:
-        return (
-            {
-                "decision": "REVIEW",
-                "reason": "No rule matched. Further assessment is required."
-            },
-            []
-        )
+        return {
+            "decision": "REVIEW",
+            "reason": "No rule matched"
+        }, []
 
     fired_sorted = sorted(
         fired,
-        key=lambda rule: rule.get("priority", 0),
+        key=lambda rule: rule["priority"],
         reverse=True
     )
 
-    best = fired_sorted[0].get(
-        "action",
-        {
-            "decision": "REVIEW",
-            "reason": "No action specified."
-        }
-    )
-
-    return best, fired_sorted
+    return fired_sorted[0]["action"], fired_sorted
 
 
-# ----------------------------
-# 2) Rule validation
-# ----------------------------
+# --------------------------------------------------
+# 4. RULE VALIDATION
+# --------------------------------------------------
 
-def validate_rules(rules: Any) -> None:
-    """Check whether the JSON rules have a valid structure."""
+def validate_rules(rules: Any) -> Tuple[bool, str]:
 
     if not isinstance(rules, list):
-        raise ValueError("Rules must be a JSON array.")
+        return False, "Rules must be a JSON list."
 
-    for index, rule in enumerate(rules):
+    allowed_fields = [
+        "cgpa",
+        "family_income",
+        "co_curricular_score",
+        "community_service_hours",
+        "current_semester",
+        "disciplinary_actions"
+    ]
+
+    for rule in rules:
 
         if not isinstance(rule, dict):
-            raise ValueError(f"Rule {index + 1} must be an object.")
+            return False, "Each rule must be a JSON object."
 
-        if not isinstance(rule.get("name"), str):
-            raise ValueError(f"Rule {index + 1} needs a valid name.")
+        required_keys = [
+            "name",
+            "priority",
+            "conditions",
+            "action"
+        ]
 
-        if not isinstance(rule.get("priority"), (int, float)):
-            raise ValueError(f"Rule {index + 1} needs a numeric priority.")
+        if not all(key in rule for key in required_keys):
+            return False, "A rule is missing required fields."
 
-        if not isinstance(rule.get("conditions"), list):
-            raise ValueError(f"Rule {index + 1} needs a conditions list.")
-
-        if not rule["conditions"]:
-            raise ValueError(f"Rule {index + 1} must have at least one condition.")
+        if not isinstance(rule["conditions"], list):
+            return False, "Rule conditions must be a list."
 
         for condition in rule["conditions"]:
 
             if not isinstance(condition, list) or len(condition) != 3:
-                raise ValueError(
-                    f"Rule {index + 1} contains an invalid condition."
-                )
+                return False, "Each condition must contain field, operator and value."
 
             field, op, value = condition
 
-            allowed_fields = [
-                "cgpa",
-                "family_income",
-                "co_curricular_score",
-                "community_service_hours",
-                "current_semester",
-                "disciplinary_actions"
-            ]
-
             if field not in allowed_fields:
-                raise ValueError(
-                    f"Rule {index + 1} contains an unknown field: {field}"
-                )
+                return False, f"Invalid field: {field}"
 
             if op not in OPS:
-                raise ValueError(
-                    f"Rule {index + 1} contains an invalid operator: {op}"
-                )
+                return False, f"Invalid operator: {op}"
 
-        action = rule.get("action")
+        if not isinstance(rule["action"], dict):
+            return False, "Rule action must be a JSON object."
 
-        if not isinstance(action, dict):
-            raise ValueError(f"Rule {index + 1} needs a valid action.")
+        if "decision" not in rule["action"] or "reason" not in rule["action"]:
+            return False, "Action must contain decision and reason."
 
-        if not action.get("decision"):
-            raise ValueError(f"Rule {index + 1} needs a decision.")
-
-        if not action.get("reason"):
-            raise ValueError(f"Rule {index + 1} needs a reason.")
+    return True, "Rules are valid."
 
 
-# ----------------------------
-# 3) Streamlit page settings
-# ----------------------------
+# --------------------------------------------------
+# 5. STREAMLIT PAGE CONFIGURATION
+# --------------------------------------------------
 
 st.set_page_config(
     page_title="Scholarship Advisory System",
     page_icon="🎓",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
 st.title("🎓 Scholarship Advisory System")
-
-st.caption(
-    "A Rule-Based Knowledge Representation System "
-    "for University Scholarship Eligibility Assessment."
-)
-
-st.markdown("""
-This application evaluates scholarship applicants using predefined
-IF–THEN rules. The system considers academic performance, financial
-background, co-curricular involvement and disciplinary records
-to generate a scholarship recommendation.
-""")
-
-# ----------------------------
-# 4) Sidebar: Applicant Facts
-# ----------------------------
-
-with st.sidebar:
-
-    st.header("👤 Applicant Information")
-
-    st.write("Enter the applicant's details below.")
-
-    cgpa = st.number_input(
-        "Cumulative GPA (CGPA)",
-        min_value=0.0,
-        max_value=4.0,
-        step=0.01,
-        value=3.50,
-        format="%.2f"
-    )
-
-    family_income = st.number_input(
-        "Monthly Family Income (MYR)",
-        min_value=0.0,
-        step=100.0,
-        value=5000.0
-    )
-
-    co_curricular_score = st.number_input(
-        "Co-curricular Involvement Score",
-        min_value=0,
-        max_value=100,
-        step=1,
-        value=75
-    )
-
-    community_service_hours = st.number_input(
-        "Community Service Hours",
-        min_value=0,
-        step=1,
-        value=30
-    )
-
-    current_semester = st.number_input(
-        "Current Semester of Study",
-        min_value=1,
-        step=1,
-        value=3
-    )
-
-    disciplinary_actions = st.number_input(
-        "Number of Disciplinary Actions",
-        min_value=0,
-        step=1,
-        value=0
-    )
-
-    st.divider()
-
-    st.header("⚙️ Evaluation Settings")
-
-    evaluate_button = st.button(
-        "Evaluate Applicant",
-        type="primary",
-        use_container_width=True
-    )
-
-    reset_button = st.button(
-        "Reset Applicant",
-        use_container_width=True
-    )
-
-    if reset_button:
-        st.rerun()
-
-
-# ----------------------------
-# 5) Collect Applicant Facts
-# ----------------------------
-
-facts = {
-    "cgpa": float(cgpa),
-    "family_income": float(family_income),
-    "co_curricular_score": int(co_curricular_score),
-    "community_service_hours": int(community_service_hours),
-    "current_semester": int(current_semester),
-    "disciplinary_actions": int(disciplinary_actions)
-}
-
-
-# ----------------------------
-# 6) JSON Rule Editor
-# ----------------------------
-
-st.subheader("📋 Knowledge Base: Rule Configuration")
-
-st.write(
-    "The following JSON editor allows the scholarship committee "
-    "to view and modify the decision rules."
-)
-
-if "rules_text" not in st.session_state:
-    st.session_state.rules_text = json.dumps(
-        DEFAULT_RULES,
-        indent=4
-    )
-
-if "evaluation_result" not in st.session_state:
-    st.session_state.evaluation_result = None
-
-with st.expander("View and Edit Scholarship Rules (JSON)", expanded=False):
-
-    rules_text = st.text_area(
-        "Edit rules here",
-        key="rules_text",
-        height=450
-    )
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        if st.button("Restore Default Rules"):
-            st.session_state.rules_text = json.dumps(
-                DEFAULT_RULES,
-                indent=4
-            )
-            st.rerun()
-
-    with col2:
-        st.download_button(
-            "Download Rules (JSON)",
-            data=st.session_state.rules_text,
-            file_name="scholarship_rules.json",
-            mime="application/json"
-        )
-
-
-# ----------------------------
-# 7) Applicant Facts Display
-# ----------------------------
+st.write("A Rule-Based System for University Scholarship Evaluation")
 
 st.divider()
 
-st.subheader("📊 Applicant Profile")
+# --------------------------------------------------
+# 6. SIDEBAR - APPLICANT INFORMATION
+# --------------------------------------------------
+
+st.sidebar.header("Applicant Information")
+
+cgpa = st.sidebar.number_input(
+    "CGPA",
+    min_value=0.0,
+    max_value=4.0,
+    value=3.50,
+    step=0.01
+)
+
+family_income = st.sidebar.number_input(
+    "Monthly Family Income (RM)",
+    min_value=0,
+    value=5000,
+    step=100
+)
+
+co_curricular_score = st.sidebar.slider(
+    "Co-curricular Score",
+    min_value=0,
+    max_value=100,
+    value=70
+)
+
+community_service_hours = st.sidebar.number_input(
+    "Community Service Hours",
+    min_value=0,
+    value=20,
+    step=1
+)
+
+current_semester = st.sidebar.number_input(
+    "Current Semester",
+    min_value=1,
+    value=3,
+    step=1
+)
+
+disciplinary_actions = st.sidebar.number_input(
+    "Number of Disciplinary Actions",
+    min_value=0,
+    value=0,
+    step=1
+)
+
+facts = {
+    "cgpa": cgpa,
+    "family_income": family_income,
+    "co_curricular_score": co_curricular_score,
+    "community_service_hours": community_service_hours,
+    "current_semester": current_semester,
+    "disciplinary_actions": disciplinary_actions
+}
+
+# --------------------------------------------------
+# 7. JSON RULE EDITOR
+# --------------------------------------------------
+
+st.sidebar.divider()
+st.sidebar.header("Scholarship Rules")
+
+if "rules_json" not in st.session_state:
+    st.session_state.rules_json = json.dumps(
+        DEFAULT_RULES,
+        indent=4,
+        ensure_ascii=False
+    )
+
+rules_text = st.sidebar.text_area(
+    "Edit Rules (JSON)",
+    value=st.session_state.rules_json,
+    height=400
+)
+
+# --------------------------------------------------
+# 8. MAIN PAGE - APPLICANT PROFILE
+# --------------------------------------------------
+
+st.subheader("Applicant Profile")
 
 col1, col2, col3 = st.columns(3)
 
-with col1:
-    st.metric("CGPA", f"{cgpa:.2f} / 4.00")
-
-with col2:
-    st.metric("Family Income", f"MYR {family_income:,.2f}")
-
-with col3:
-    st.metric("Co-curricular Score", f"{co_curricular_score} / 100")
+col1.metric("CGPA", f"{cgpa:.2f} / 4.00")
+col2.metric("Family Income", f"RM {family_income:,.2f}")
+col3.metric("Co-curricular Score", f"{co_curricular_score} / 100")
 
 col4, col5, col6 = st.columns(3)
 
-with col4:
-    st.metric("Community Service", f"{community_service_hours} hours")
+col4.metric("Community Service", f"{community_service_hours} hours")
+col5.metric("Current Semester", current_semester)
+col6.metric("Disciplinary Actions", disciplinary_actions)
 
-with col5:
-    st.metric("Current Semester", current_semester)
+st.divider()
 
-with col6:
-    st.metric("Disciplinary Actions", disciplinary_actions)
+# --------------------------------------------------
+# 9. EVALUATE SCHOLARSHIP APPLICATION
+# --------------------------------------------------
 
+st.subheader("Scholarship Evaluation")
 
-# ----------------------------
-# 8) Parse and Validate Rules
-# ----------------------------
+if st.button("Evaluate Application", type="primary"):
 
-try:
+    try:
+        rules = json.loads(rules_text)
 
-    rules = json.loads(st.session_state.rules_text)
+        valid, message = validate_rules(rules)
 
-    validate_rules(rules)
-
-    rules_valid = True
-
-except (json.JSONDecodeError, ValueError, TypeError) as e:
-
-    st.error(f"Invalid rules configuration: {e}")
-
-    st.warning(
-        "Please correct the JSON rules before evaluating the applicant."
-    )
-
-    rules_valid = False
-    rules = []
-
-
-# ----------------------------
-# 9) Evaluate Scholarship Applicant
-# ----------------------------
-
-if evaluate_button:
-
-    if rules_valid:
-
-        action, fired = run_rules(facts, rules)
-
-        st.session_state.evaluation_result = {
-            "facts": facts.copy(),
-            "action": action,
-            "fired": fired,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        }
-
-    else:
-
-        st.session_state.evaluation_result = None
-
-
-# ----------------------------
-# 10) Display Evaluation Results
-# ----------------------------
-
-result = st.session_state.evaluation_result
-
-if result is not None:
-
-    st.divider()
-
-    st.subheader("🎯 Scholarship Evaluation Result")
-
-    action = result["action"]
-    fired = result["fired"]
-
-    decision = action.get("decision", "REVIEW")
-    reason = action.get("reason", "-")
-
-    # Decision display
-
-    if decision == "AWARD_FULL":
-
-        st.success("🏆 FULL SCHOLARSHIP AWARDED")
-
-    elif decision == "AWARD_PARTIAL":
-
-        st.success("🥈 PARTIAL SCHOLARSHIP AWARDED")
-
-    elif decision == "REJECT":
-
-        st.error("❌ SCHOLARSHIP APPLICATION REJECTED")
-
-    else:
-
-        st.warning("⚠️ MANUAL REVIEW REQUIRED")
-
-    result_col1, result_col2 = st.columns([1, 1])
-
-    with result_col1:
-
-        st.markdown("### Final Decision")
-
-        st.subheader(decision)
-
-        st.write("**Reason for Decision:**")
-
-        st.info(reason)
-
-    with result_col2:
-
-        st.markdown("### Decision Information")
-
-        st.write(
-            f"**Matched Rules:** {len(fired)}"
-        )
-
-        if fired:
-
-            st.write(
-                f"**Highest Priority:** {fired[0].get('priority', 0)}"
-            )
-
-            st.write(
-                f"**Selected Rule:** {fired[0].get('name', '-')}"
-            )
+        if not valid:
+            st.error(message)
 
         else:
+            st.session_state.rules_json = json.dumps(
+                rules,
+                indent=4,
+                ensure_ascii=False
+            )
 
-            st.write("**Selected Rule:** No matching rule")
+            result, fired_rules = run_rules(facts, rules)
 
-        st.write(
-            f"**Evaluation Time:** {result['timestamp']}"
-        )
+            st.session_state.evaluation_result = result
+            st.session_state.fired_rules = fired_rules
+            st.session_state.evaluated_facts = facts
 
-    # ----------------------------
-    # 11) Matched Rules
-    # ----------------------------
+    except json.JSONDecodeError as error:
+        st.error(f"Invalid JSON format: {error}")
+
+# --------------------------------------------------
+# 10. DISPLAY EVALUATION RESULT
+# --------------------------------------------------
+
+if "evaluation_result" in st.session_state:
+
+    result = st.session_state.evaluation_result
+    fired_rules = st.session_state.fired_rules
+
+    st.subheader("Evaluation Result")
+
+    decision = result["decision"]
+    reason = result["reason"]
+
+    if decision == "AWARD_FULL":
+        st.success("Decision: FULL SCHOLARSHIP")
+
+    elif decision == "AWARD_PARTIAL":
+        st.success("Decision: PARTIAL SCHOLARSHIP")
+
+    elif decision == "REJECT":
+        st.error("Decision: REJECTED")
+
+    else:
+        st.warning("Decision: FURTHER REVIEW REQUIRED")
+
+    st.write("**Decision Code:**", decision)
+    st.write("**Reason:**", reason)
 
     st.divider()
 
-    st.subheader("📌 Matched Rules (Sorted by Priority)")
+    # Matched Rules
+    st.subheader("Matched Rules")
 
-    if not fired:
+    if fired_rules:
 
-        st.info(
-            "No predefined rules matched this applicant. "
-            "The application requires further assessment."
-        )
-
-    else:
-
-        for index, rule in enumerate(fired, start=1):
+        for rule in fired_rules:
 
             with st.expander(
-                f"{index}. {rule.get('name', 'Unnamed Rule')} "
-                f"| Priority: {rule.get('priority', 0)}",
-                expanded=(index == 1)
+                f"{rule['name']} (Priority: {rule['priority']})"
             ):
-
-                st.write(
-                    f"**Decision:** {rule.get('action', {}).get('decision', '-')}"
-                )
-
-                st.write(
-                    f"**Reason:** {rule.get('action', {}).get('reason', '-')}"
-                )
 
                 st.write("**Conditions:**")
 
-                for condition in rule.get("conditions", []):
+                for condition in rule["conditions"]:
 
                     field, op, value = condition
 
-                    actual_value = facts[field]
+                    matched = evaluate_condition(
+                        st.session_state.evaluated_facts,
+                        condition
+                    )
 
-                    matched = evaluate_condition(facts, condition)
+                    status = "Matched" if matched else "Not Matched"
 
-                    if matched:
-                        st.success(
-                            f"{field}: {actual_value} {op} {value} ✓"
-                        )
-                    else:
-                        st.error(
-                            f"{field}: {actual_value} {op} {value} ✗"
-                        )
+                    st.write(
+                        f"{field} {op} {value} — {status}"
+                    )
 
-    # ----------------------------
-    # 12) Evaluation Summary
-    # ----------------------------
+                st.write(
+                    "**Decision:**",
+                    rule["action"]["decision"]
+                )
 
-    st.divider()
+                st.write(
+                    "**Reason:**",
+                    rule["action"]["reason"]
+                )
 
-    st.subheader("📑 Evaluation Summary")
+    else:
+        st.info("No predefined rule matched the applicant.")
+
+    # Evaluation Summary
+    st.subheader("Evaluation Summary")
 
     summary_data = {
         "Applicant Information": [
             "CGPA",
-            "Monthly Family Income (MYR)",
+            "Monthly Family Income",
             "Co-curricular Score",
             "Community Service Hours",
             "Current Semester",
             "Disciplinary Actions"
         ],
-        "Applicant Values": [
-            facts["cgpa"],
-            facts["family_income"],
-            facts["co_curricular_score"],
-            facts["community_service_hours"],
-            facts["current_semester"],
-            facts["disciplinary_actions"]
+        "Value": [
+            st.session_state.evaluated_facts["cgpa"],
+            f"RM {st.session_state.evaluated_facts['family_income']:,.2f}",
+            st.session_state.evaluated_facts["co_curricular_score"],
+            st.session_state.evaluated_facts["community_service_hours"],
+            st.session_state.evaluated_facts["current_semester"],
+            st.session_state.evaluated_facts["disciplinary_actions"]
         ]
     }
 
@@ -621,65 +445,31 @@ if result is not None:
         hide_index=True
     )
 
-    # ----------------------------
-    # 13) Download Evaluation Report
-    # ----------------------------
-
+    # Download Report
     report = {
-        "evaluation_time": result["timestamp"],
-        "applicant_facts": facts,
-        "final_decision": decision,
-        "reason": reason,
-        "selected_rule": (
-            fired[0]["name"] if fired else "No matching rule"
-        ),
-        "matched_rules": [
-            {
-                "name": rule.get("name"),
-                "priority": rule.get("priority"),
-                "action": rule.get("action")
-            }
-            for rule in fired
-        ]
+        "applicant_information": st.session_state.evaluated_facts,
+        "final_decision": result,
+        "matched_rules": fired_rules
     }
 
-    report_json = json.dumps(
-        report,
-        indent=4
-    )
-
     st.download_button(
-        label="📥 Download Evaluation Report (JSON)",
-        data=report_json,
+        label="Download Evaluation Report (JSON)",
+        data=json.dumps(report, indent=4, ensure_ascii=False),
         file_name="scholarship_evaluation_report.json",
-        mime="application/json",
-        use_container_width=True
+        mime="application/json"
     )
 
-else:
-
-    st.divider()
-
-    st.info(
-        "Enter the applicant's information in the sidebar "
-        "and click **Evaluate Applicant** to generate a scholarship decision."
-    )
-
-
-# ----------------------------
-# 14) Footer
-# ----------------------------
+# --------------------------------------------------
+# 11. FOOTER
+# --------------------------------------------------
 
 st.divider()
 
 st.caption(
-    "Scholarship Advisory System | "
-    "Artificial Intelligence Lab Report 3 | "
-    "Knowledge Representation System"
+    "Scholarship Advisory System | Artificial Intelligence Lab Report 3"
 )
 
 st.caption(
-    "Note: This application provides decision support based on "
-    "predefined rules. Final scholarship approval remains subject "
-    "to the university scholarship committee."
+    "This system provides recommendations based on predefined rules. "
+    "Final scholarship approval remains the responsibility of the scholarship committee."
 )
