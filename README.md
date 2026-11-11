@@ -92,4 +92,8 @@ http://localhost:8501
 - **Lab:** Lab Report 3 – Knowledge Representation System
 ---
 
+## 10. Link
+
+https://labreport3-sd24037.streamlit.app/
+
 *This project was developed for academic purposes as part of the Artificial Intelligence laboratory assignment.*
